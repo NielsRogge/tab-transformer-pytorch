@@ -168,12 +168,12 @@ class TabTransformer(nn.Module):
 
         # continuous
 
-        if exists(continuous_mean_std):
-            assert continuous_mean_std.shape == (num_continuous, 2), f'continuous_mean_std must have a shape of ({num_continuous}, 2) where the last dimension contains the mean and variance respectively'
-        self.register_buffer('continuous_mean_std', continuous_mean_std)
-
-        self.norm = nn.LayerNorm(num_continuous)
         self.num_continuous = num_continuous
+        if num_continuous != 0:
+            if exists(continuous_mean_std):
+                assert continuous_mean_std.shape == (num_continuous, 2), f'continuous_mean_std must have a shape of ({num_continuous}, 2) where the last dimension contains the mean and variance respectively'
+            self.register_buffer('continuous_mean_std', continuous_mean_std)
+            self.norm = nn.LayerNorm(num_continuous)
 
         # transformer
 
@@ -197,21 +197,22 @@ class TabTransformer(nn.Module):
 
         self.mlp = MLP(all_dimensions, act = mlp_act)
 
-    def forward(self, x_categ, x_cont):
+    def forward(self, x_categ, x_cont=None):
         assert x_categ.shape[-1] == self.num_categories, f'you must pass in {self.num_categories} values for your categories input'
         x_categ += self.categories_offset
 
         x = self.transformer(x_categ)
 
-        flat_categ = x.flatten(1)
+        x = x.flatten(1)
 
-        assert x_cont.shape[1] == self.num_continuous, f'you must pass in {self.num_continuous} values for your continuous input'
-
-        if exists(self.continuous_mean_std):
-            mean, std = self.continuous_mean_std.unbind(dim = -1)
-            x_cont = (x_cont - mean) / std
-
-        normed_cont = self.norm(x_cont)
-
-        x = torch.cat((flat_categ, normed_cont), dim = -1)
+        if self.num_continuous != 0:
+            assert x_cont.shape[1] == self.num_continuous, f'you must pass in {self.num_continuous} values for your continuous input'
+            if exists(self.continuous_mean_std):
+                mean, std = self.continuous_mean_std.unbind(dim = -1)
+                x_cont = (x_cont - mean) / std
+            
+            
+            normed_cont = self.norm(x_cont)
+            x = torch.cat((x, normed_cont), dim = -1)
+        
         return self.mlp(x)
